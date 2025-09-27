@@ -1,0 +1,26 @@
+{
+    "configurations": [
+        {
+            "browse": {
+                "databaseFilename": "${workspaceFolder}/.vscode/browse.vc.db",
+                "limitSymbolsToIncludedHeaders": false
+            },
+            "includePath": [
+                "/home/whit/vqwBat_ws/install/bq25820_node/include/**",
+                "/home/whit/vqwBat_ws/install/bq25820/include/**",
+                "/home/whit/vqwBat_ws/install/BQ25820/include/**",
+                "/opt/ros/kilted/include/**",
+                "/opt/ros/kilted/share/**",
+                "/home/whit/vqwBat_ws/src/BQ25820/include/**",
+                "/home/whit/vqwBat_ws/src/bq25820_node/include/**",
+                "/usr/include/**"
+            ],
+            "name": "ros2",
+            "intelliSenseMode": "gcc-arm64",
+            "compilerPath": "/usr/bin/gcc",
+            "cStandard": "gnu17",
+            "cppStandard": "gnu++20"
+        }
+    ],
+    "version": 4
+}

@@ -1,0 +1,9 @@
+<library path="bq25820_hardware_interface">
+  <class name="bq25820_hardware_interface/Bq25820HardwareInterface"
+         type="bq25820_hardware_interface::Bq25820HardwareInterface"
+         base_class_type="hardware_interface::SystemInterface">
+    <description>
+      BQ25820 battery charger hardware interface for ros2_control.
+    </description>
+  </class>
+</library>
