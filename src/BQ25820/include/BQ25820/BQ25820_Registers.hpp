@@ -51,4 +51,18 @@ namespace BQ25820
         REG0x3D_Part_Information                       = 0x3D,
         REG0x62_Reverse_Mode_Battery_Discharge_Current = 0x3E
     };
+
+    enum class BQ25820_Charge_Status : uint8_t
+    {
+        Not_charging = 0x00,
+        Trickle_Charge = 0x01,
+        Pre_Charge = 0x02,
+        Fast_Charge = 0x03,
+        Taper_Charge = 0x04,
+        Reserved_0x05 = 0x05,
+        Top_off_Timer_Charge = 0x06,
+        Charge_Termination_Done = 0x07
+    };
+
+
 }       // namespace BQ25820

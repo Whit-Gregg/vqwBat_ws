@@ -1,5 +1,6 @@
 #include "BQ25820/BQ25820.hpp"
 #include "BQ25820/BQ25820_Registers.hpp"
+#include "vqw_debug.hpp"
 
 #include <linux/i2c-dev.h>
 #include <linux/i2c.h>
@@ -55,6 +56,40 @@ namespace BQ25820
 
     //~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=
     //~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=
+    void BQ25820::spin_ADC()
+    {
+        if ((elap_since_ADC_read_ > elap_since_ADC_start_interval_) && !adc_OneShot_in_progress_) { start_ADC_Conversion(); }
+        if ((elap_since_ADC_read_ > elap_since_ADC_read_interval_) && adc_OneShot_in_progress_)
+            {
+                adc_OneShot_in_progress_ = false;
+                read_all_ADC_values();
+                elap_since_ADC_read_ = 0;
+                display_ADC_values();
+            }
+    }
+
+    void BQ25820::spin_status_change()
+    {
+        if (elap_since_status_check > elap_since_status_check_interval)
+            {
+                elap_since_status_check = 0;
+                bool has_changed        = update_statuses();
+                if (has_changed)
+                    {
+                        display_status_changes();
+                        // ToDo: do something about the new status
+                    }
+            }
+    }
+
+    void BQ25820::display_status_changes()
+    {
+        std::string changes = get_Status_changes_str();
+        BUG_INFO(values.c_str());
+    }
+
+    //~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=
+    //~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=
     void BQ25820::spinOnce()
     {
         // Code to run in each iteration
@@ -62,16 +97,33 @@ namespace BQ25820
         //~`=-+~`=-+~`=-+~`=-+~`=-+~`=-+~`=-+~`=-+~`=-+~`=-+~`=-+~`=-+~`=-+~`=-+~`=-+~`=-+~`=-+
         //~`=-+
         //~`=-+  ADC handling
-        if ((elap_since_ADC_read_ > elap_since_ADC_start_interval_) && !adc_OneShot_in_progress_)
-            {
-                start_ADC_Conversion();
-            }
-        if ((elap_since_ADC_read_ > elap_since_ADC_read_interval_) && adc_OneShot_in_progress_)
-            {
-                adc_OneShot_in_progress_ = false;
-                read_all_ADC_values();
-                elap_since_ADC_read_ = 0;
-            }
+        spin_ADC();
+
+        //~`=-+~`=-+~`=-+~`=-+~`=-+~`=-+~`=-+~`=-+~`=-+~`=-+~`=-+~`=-+~`=-+~`=-+~`=-+~`=-+~`=-+
+        //~`=-+
+        //~`=-+  Status handling
+        spin_status_change();
+    }
+
+    //~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=
+    std::string BQ25820::ADC_values_str()
+    {
+        char buf[256];
+        sprintf(buf, "ADC Values:\n");
+        sprintf(buf + strlen(buf), "      iAC = %4.2f\n", ADC_IAC_value_amps_);
+        sprintf(buf + strlen(buf), "     iBAT = %4.2f\n", ADC_IBAT_value_amps_);
+        sprintf(buf + strlen(buf), "      vAC = %4.2f\n", ADC_VAC_value_volts_);
+        sprintf(buf + strlen(buf), "     vBAT = %4.2f\n", ADC_VBAT_value_volts_);
+        sprintf(buf + strlen(buf), "     vSYS = %4.2f\n", ADC_VSYS_value_volts_);
+        sprintf(buf + strlen(buf), "     TS_c = %4.2f\n", ADC_TS_value_celsius_);
+        sprintf(buf + strlen(buf), "   TS_per = %4.2f\n", ADC_TS_value_percent_of_REGN_);
+        return buf;
+    }
+
+    void BQ25820::display_ADC_values()
+    {
+        std::string values = ADC_values_str();
+        BUG_INFO(values.c_str());
     }
 
     //~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=
@@ -247,6 +299,13 @@ namespace BQ25820
         return ok;
     }
 
+    BQ25820_Charge_Status BQ25820::get_charging_status() const
+    {
+        uint8_t v = get_Charger_Status1();
+        v         = v & 0x07;
+        return static_cast<BQ25820_Charge_Status>(v);
+    }
+
     void BQ25820::set_ChargeCurrentLimit(float limit_in_amps)
     {
         if (limit_in_amps < 1) limit_in_amps = 1;
@@ -257,6 +316,115 @@ namespace BQ25820
     }
 
     //~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=
+    bool BQ25820::update_statuses()
+    {
+        status1_previous_      = status1_current_;
+        status2_previous_      = status2_current_;
+        status3_previous_      = status3_current_;
+        fault_status_previous_ = fault_status_current_;
+        flag1_previous_        = flag1_current_;
+        flag2_previous_        = flag2_current_;
+        fault_flag_previous_   = fault_flag_current_;
+
+        status1_current_      = get_Charger_Status1();
+        status2_current_      = get_Charger_Status2();
+        status3_current_      = get_Charger_Status3();
+        fault_status_current_ = get_Fault_Status();
+        flag1_current_        = get_Charger_Flag1();
+        flag2_current_        = get_Charger_Flag2();
+        fault_flag_current_   = get_Fault_Flag();
+
+        bool has_changed = false;
+        has_changed |= status1_previous_ != status1_current_;
+        has_changed |= status2_previous_ != status2_current_;
+        has_changed |= status3_previous_ != status3_current_;
+        has_changed |= fault_status_previous_ != fault_status_current_;
+        has_changed |= flag1_previous_ != flag1_current_;
+        has_changed |= flag2_previous_ != flag2_current_;
+        has_changed |= fault_flag_previous_ != fault_flag_current_;
+
+        return has_changed;
+    }
+    //~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=
+    //~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=
+    std::string BQ25820::get_Charger_Status1_changes_str() const
+    {
+        std::string status;
+        uint8_t     changes = get_status_bits_changes(status1_previous_, status1_current_);
+        if (changes & bit6) status += " InputCurrentReg changed;";
+        if (changes & bit5) status += " InputVoltageReg changed;";
+        if (changes & bit3) status += " WatchDogExp changed;";
+        if (changes & (bit0 | bit1 | bit2)) status += " Charge Cycle changed;";
+        return status;
+    }
+
+    std::string BQ25820::get_Charger_Status2_changes_str() const
+    {
+        std::string status;
+        uint8_t     changes = get_status_bits_changes(status2_previous_, status2_current_);
+        if (changes & bit7) status += " Input Power GOOD changed;";
+        if (changes & (bit6 | bit5 | bit4)) status += " NTC changed;";
+        return status;
+    }
+    std::string BQ25820::get_Charger_Status3_changes_str() const
+    {
+        std::string status;
+        uint8_t     changes = get_status_bits_changes(status3_previous_, status3_current_);
+        if (changes & bit2) status += " Reverse Mode changed;";
+        if (changes & bit1) status += " ACFET On changed;";
+        if (changes & bit0) status += " BATFET On changed;";
+        return status;
+    }
+    std::string BQ25820::get_Fault_Status_changes_str() const
+    {
+        std::string status;
+        uint8_t     changes = get_status_bits_changes(fault_status_previous_, fault_status_current_);
+        if (changes & bit7) status += " Input Under Voltage changed;";
+        if (changes & bit6) status += " Input Over Voltage changed;";
+        if (changes & bit5) status += " Bat Over Current changed;";
+        if (changes & bit4) status += " BAT Over Voltage changed;";
+        if (changes & bit3) status += " Thermal Shutdown changed;";
+        if (changes & bit2) status += " Safty Timer Exp changed;";
+        if (changes & bit1) status += " DRV_SUP Voltage Bad changed;";
+        return status;
+    }
+    std::string BQ25820::get_Charger_Flag1_changes_str() const
+    {
+        std::string status;
+        uint8_t     changes = get_status_bits_changes(flag1_previous_, flag1_current_);
+        if (changes & bit7) status += " ADC Done INT changed;";
+        if (changes & bit6) status += " Input Current INT changed;";
+        if (changes & bit5) status += " Input Voltage INT changed;";
+        if (changes & bit3) status += " WD_STAT rising INT changed;";
+        if (changes & bit0) status += " Charge Cycle Changed INT changed;";
+        return status;
+    }
+    std::string BQ25820::get_Charger_Flag2_changes_str() const;
+    {
+        std::string status;
+        uint8_t     changes = get_status1_changes(flag2_previous_, flag2_current_);
+        if (changes & bit7) status += " PG changed INT changed;";
+        if (changes & bit6) status += " ACFET changed INT changed;";
+        if (changes & bit5) status += " BATFET changed INT changed;";
+        if (changes & bit4) status += " BAT NTC changed INT changed;";
+        if (changes & bit3) status += " Reverse Mode INT changed;";
+        if (changes & bit0) status += " MPPT changed INT changed;";
+        return status;
+    }
+    std::string BQ25820::get_Fault_Flag_changes_str() const
+    {
+        std::string status;
+        uint8_t     changes = get_status_bits_changes(fault_flag_previous_, fault_flag_current_);
+        if (changes & bit7) status += " Input Under Voltage INT changed;";
+        if (changes & bit6) status += " Input Over Voltage INT changed;";
+        if (changes & bit5) status += " Bat Over Current INT changed;";
+        if (changes & bit4) status += " BAT Over Voltage INT changed;";
+        if (changes & bit3) status += " Thermal Shutdown INT changed;";
+        if (changes & bit2) status += " Safty Timer Exp INT changed;";
+        if (changes & bit1) status += " DRV_SUP Voltage Bad INT changed;";
+        return status;
+    }
+
     //~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=~-+=
 
     std::string BQ25820::get_Charger_Status1_str(uint8_t stat1) const
@@ -368,8 +536,7 @@ namespace BQ25820
         std::string status;
         uint8_t     part_num = (part_info & (bit5 | bit4 | bit3)) >> 3;
         uint8_t     dev_rev  = part_info & (bit2 | bit1 | bit0);
-        if (part_num == 0x03)
-            status += " Part Number: BQ25820\n";
+        if (part_num == 0x03) status += " Part Number: BQ25820\n";
         else
             status += " Part Number: Unknown\n";
         status += "Device Revision: " + std::to_string(dev_rev);
@@ -399,6 +566,33 @@ namespace BQ25820
         status += "Part Information: " + get_Part_Information_str(part_info) + "\n";
 
         return status;
+    }
+
+    std::string BQ25820::get_Status_changes_str() const
+    {
+        std::string status;
+        std::string stat1 = get_Charger_Status1_changes_str();
+        if (stat1.empty() == false) { status += "\tCharger Status1 Changes: " + stat1 + "\n"; }
+        std::string stat2 = get_Charger_Status2_changes_str();
+        if (stat2.empty() == false) { status += "\tCharger Status2 Changes: " + stat2 + "\n"; }
+        std::string stat3 = get_Charger_Status3_changes_str();
+        if (stat3.empty() == false) { status += "\tCharger Status3 Changes: " + stat3 + "\n"; }
+        std::string fault = get_Fault_Status_changes_str();
+        if (fault.empty() == false) { status += "\tFault Status Changes: " + fault + "\n"; }
+        std::string flag1 = get_Charger_Flag1_changes_str();
+        if (flag1.empty() == false) { status += "\tCharger Flag1 Changes: " + flag1 + "\n"; }
+        std::string flag2 = get_Charger_Flag2_changes_str();
+        if (flag2.empty() == false) { status += "\tCharger Flag2 Changes: " + flag2 + "\n"; }
+        std::string fault_flag = get_Fault_Flag_changes_str();
+        if (fault_flag.empty() == false) { status += "\tFault Flag Changes: " + fault_flag + "\n"; }
+
+        std::string status_big;
+        if (status.empty() == false)
+            {
+                status_big = "Status Changes:\n";
+                status_big += status;
+            }
+        return status_big;
     }
 
 }       // namespace BQ25820
